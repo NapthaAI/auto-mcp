@@ -1,0 +1,32 @@
+[build-system]
+requires = ["setuptools>=42", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "auto-mcp"
+version = "0.1.0"
+description = "Auto MCP server implementation"
+readme = "README.md"
+requires-python = ">=3.10"  # Updated from >=3.9 to match mcp[cli] requirements
+license = {file = "LICENSE"}
+dependencies = [
+    "langchain>=0.3.0",
+    "langchain-community>=0.0.10",
+    "langchain-openai>=0.0.1",
+    "openai>=1.1.0",
+    "python-dotenv>=1.0.0",
+    "mcp[cli]>=0.0.1",
+]
+
+[project.optional-dependencies]
+dev = [
+    "pytest>=7.0.0",
+    "black>=23.0.0",
+    "isort>=5.12.0",
+]
+
+[tool.black]
+line-length = 88
+
+[tool.isort]
+profile = "black"
