@@ -1,6 +1,6 @@
 from langchain_openai import OpenAI
 from langchain.agents import AgentType, Tool, initialize_agent
-from auto_mcp import mcp_server
+from src.auto_mcp import mcp_server
 from dotenv import load_dotenv
 import os
 import sys

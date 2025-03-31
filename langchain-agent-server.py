@@ -4,7 +4,7 @@ import sys
 from dotenv import load_dotenv
 from langchain_community.chat_models import ChatPerplexity
 from langgraph.prebuilt import create_react_agent
-from auto_mcp import mcp_server
+from src.auto_mcp import mcp_server
 
 import asyncio
 
