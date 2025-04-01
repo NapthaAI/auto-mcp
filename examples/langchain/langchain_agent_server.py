@@ -21,25 +21,35 @@ logging.basicConfig(
 # Load environment variables from .env file
 load_dotenv()
 
-# Verify that the API key is available
-perplexity_api_key = os.environ.get("PERPLEXITY_API_KEY")
-if not perplexity_api_key:
-    print("Error: PERPLEXITY_API_KEY environment variable is not set.")
-    print("Please set it in your .env file or export it in your environment.")
-    sys.exit(1)
-
+# Create logger for both modules to use
 logger = logging.getLogger("langchain-agent")
 
-# Initialize your language model
-logger.info("Initializing Perplexity language model")
-model = ChatPerplexity(
-    model="sonar",
-    api_key=perplexity_api_key  # Explicitly pass the API key
-)
+# Set up API key
+def setup_api_key():
+    """Verify API key and return it if available"""
+    perplexity_api_key = os.environ.get("PERPLEXITY_API_KEY")
+    if not perplexity_api_key:
+        print("Error: PERPLEXITY_API_KEY environment variable is not set.")
+        print("Please set it in your .env file or export it in your environment.")
+        sys.exit(1)
+    return perplexity_api_key
 
-# Create your Langchain agent
-logger.info("Creating Langchain agent")
-agent = create_react_agent(model, tools=[], debug=True)
+# Initialize your language model and agent
+def initialize_agent():
+    """Initialize Perplexity language model and create Langchain agent"""
+    perplexity_api_key = setup_api_key()
+    
+    logger.info("Initializing Perplexity language model")
+    model = ChatPerplexity(
+        model="sonar",
+        api_key=perplexity_api_key
+    )
+
+    logger.info("Creating Langchain agent")
+    return create_react_agent(model, tools=[], debug=True)
+
+# Global agent instance
+agent = initialize_agent()
 
 # Define input schema for the MCP server
 class QueryInput(BaseModel):
@@ -47,9 +57,6 @@ class QueryInput(BaseModel):
     
     class Config:
         extra = "forbid"
-
-# Initialize the MCP server
-logger.info("Initializing MCP server")
 
 @langchain_mcp(
     input_schema=QueryInput,

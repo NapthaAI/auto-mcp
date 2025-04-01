@@ -27,11 +27,12 @@ uv pip install -e .
 ### 4. Run the MCP Server
 Create New terminal
 ```bash
+export PackagePath=$PWD
 cd examples/langchain
 uv venv
 source .venv/bin/activate
-uv pip install -e <path-to-the-local-package>
-uv --directory $PWD run langchain-agent-server.py
+uv pip install -e $PackagePath
+uv --directory $PWD run langchain_agent_server.py
 ```
 This starts the Model Context Protocol (MCP) server using uv to run the langchain-agent-server.py script from the current directory.
 

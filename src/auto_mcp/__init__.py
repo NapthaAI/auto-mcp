@@ -10,323 +10,50 @@ from mcp.types import CallToolResult, TextContent
 from pydantic import BaseModel, create_model
 
 
-class BaseMCPAdapter:
-    """Base adapter for converting agent frameworks to MCP servers."""
+def _get_json_type(python_type):
+    """Convert Python type to JSON schema type."""
+    type_mapping = {
+        "int": "integer",
+        "float": "number",
+        "str": "string",
+        "bool": "boolean",
+        "list": "array",
+        "dict": "object",
+    }
     
-    def __init__(
-        self,
-        name: str,
-        input_schema: Type[BaseModel],
-        transport: Literal["stdio", "sse"] = "stdio",
-        host: str = "localhost",
-        port: int = 8000,
-        description: str = None,
-        debug: bool = False,
-    ):
-        """Initialize the base adapter with common parameters."""
-        self.name = name
-        self.input_schema = input_schema
-        self.description = description or f"MCP server for {name}"
-        self.transport = transport
-        self.host = host
-        self.port = port
-        self.debug = debug
-        self.mcp_server = FastMCP(name)
-        self._setup_mcp_server()
+    if hasattr(python_type, "__name__"):
+        type_name = python_type.__name__.lower()
+    else:
+        type_name = str(python_type).lower()
     
-    def _log(self, message: str):
-        """Log a message if debug is enabled."""
-        if self.debug:
-            print(f"DEBUG: {message}")
-    
-    def _setup_mcp_server(self):
-        """Set up the MCP server with tools."""
-        @self.mcp_server.tool()
-        def list_tools() -> List[MCPTool]:
-            return self._get_tools()
-        
-        @self.mcp_server.tool()
-        async def call_tool(name: str, arguments: Dict[str, Any]) -> CallToolResult:
-            return await self._handle_tool_call(name, arguments)
-    
-    def _get_tools(self) -> List[MCPTool]:
-        """Get the list of tools for this adapter."""
-        schema_fields = {}
-        for field_name, field_info in self.input_schema.model_fields.items():
-            required = field_info.is_required()
-            schema_fields[field_name] = {
-                "type": self._get_json_type(field_info.annotation),
-                "description": getattr(field_info, "description", ""),
-                "required": required
-            }
-        
-        tool = MCPTool(
-            name=self.name,
-            description=self.description,
-            inputSchema=schema_fields
-        )
-        
-        return [tool]
-    
-    def _get_json_type(self, python_type):
-        """Convert Python type to JSON schema type."""
-        type_mapping = {
-            "int": "integer",
-            "float": "number",
-            "str": "string",
-            "bool": "boolean",
-            "list": "array",
-            "dict": "object",
+    return type_mapping.get(type_name, "string")
+
+
+def _get_tools(name: str, description: str, input_schema: Type[BaseModel]) -> List[MCPTool]:
+    """Get the list of tools based on input schema."""
+    schema_fields = {}
+    for field_name, field_info in input_schema.model_fields.items():
+        required = field_info.is_required()
+        schema_fields[field_name] = {
+            "type": _get_json_type(field_info.annotation),
+            "description": getattr(field_info, "description", ""),
+            "required": required
         }
-        
-        if hasattr(python_type, "__name__"):
-            type_name = python_type.__name__.lower()
-        else:
-            type_name = str(python_type).lower()
-        
-        return type_mapping.get(type_name, "string")
     
-    async def _handle_tool_call(self, name: str, arguments: Dict[str, Any]) -> CallToolResult:
-        """Handle a tool call."""
-        raise NotImplementedError("Subclasses must implement _handle_tool_call")
+    tool = MCPTool(
+        name=name,
+        description=description,
+        inputSchema=schema_fields
+    )
     
-    def run(self):
-        """Run the MCP server."""
-        print(f"\n🚀 Starting MCP server '{self.name}' with {self.transport} transport")
-        try:
-            if self.transport == "stdio":
-                self.mcp_server.run(transport="stdio")
-            elif self.transport == "sse":
-                print(f"📡 Listening on http://{self.host}:{self.port}")
-                self.mcp_server.run(transport="sse", host=self.host, port=self.port)
-            else:
-                raise ValueError(f"Unsupported transport: {self.transport}")
-        except Exception as e:
-            import traceback
-            print(f"ERROR in run: {str(e)}\n{traceback.format_exc()}")
+    return [tool]
 
 
-class LangChainAdapter(BaseMCPAdapter):
-    """Adapter for LangChain agents."""
-    
-    def __init__(
-        self,
-        agent_factory: Callable,
-        name: str,
-        input_schema: Type[BaseModel],
-        transport: Literal["stdio", "sse"] = "stdio",
-        host: str = "localhost",
-        port: int = 8000,
-        description: str = None,
-        debug: bool = False,
-    ):
-        self.agent_factory = agent_factory
-        self.agent = None
-        super().__init__(name, input_schema, transport, host, port, description, debug)
-    
-    async def _handle_tool_call(self, name: str, arguments: Dict[str, Any]) -> CallToolResult:
-        """Handle tool calls for LangChain agents."""
-        self._log(f"Tool call: {name} with arguments: {arguments}")
-        
-        # Handle nested call_tool pattern
-        if name == "call_tool" and isinstance(arguments, dict) and "name" in arguments and "arguments" in arguments:
-            nested_name = arguments["name"]
-            nested_args = arguments["arguments"]
-            self._log(f"Nested call_tool - name: {nested_name}")
-            return await self._handle_tool_call(nested_name, nested_args)
-        
-        # Handle call to our main tool
-        if name == self.name:
-            try:
-                # Convert string arguments to proper input schema if needed
-                if isinstance(arguments, str):
-                    arguments = {"query": arguments}
-                
-                # Validate input against schema
-                input_data = self.input_schema(**arguments)
-                
-                # Call the agent factory with validated input
-                if self.agent is None:
-                    if asyncio.iscoroutinefunction(self.agent_factory):
-                        self.agent = await self.agent_factory(**input_data.model_dump())
-                    else:
-                        self.agent = self.agent_factory(**input_data.model_dump())
-                
-                # Process input with the agent
-                if hasattr(self.agent, "invoke"):
-                    if asyncio.iscoroutinefunction(self.agent.invoke):
-                        result = await self.agent.invoke(input_data.model_dump())
-                    else:
-                        result = self.agent.invoke(input_data.model_dump())
-                elif hasattr(self.agent, "run"):
-                    if asyncio.iscoroutinefunction(self.agent.run):
-                        result = await self.agent.run(str(input_data.model_dump()))
-                    else:
-                        result = self.agent.run(str(input_data.model_dump()))
-                else:
-                    result = str(self.agent)
-                
-                return CallToolResult(
-                    isError=False,
-                    content=[TextContent(type="text", text=str(result))]
-                )
-            except Exception as e:
-                import traceback
-                tb = traceback.format_exc()
-                self._log(f"Error: {str(e)}\n{tb}")
-                return CallToolResult(
-                    isError=True,
-                    content=[TextContent(type="text", text=f"Error: {str(e)}")]
-                )
-        
-        return CallToolResult(
-            isError=True,
-            content=[TextContent(type="text", text=f"Tool not found: {name}")]
-        )
+def _log(message: str, debug: bool):
+    """Log a message if debug is enabled."""
+    if debug:
+        print(f"DEBUG: {message}")
 
-
-class CrewAIAdapter(BaseMCPAdapter):
-    """Adapter for CrewAI crews."""
-    
-    def __init__(
-        self,
-        crew_factory: Callable,
-        name: str,
-        input_schema: Type[BaseModel],
-        transport: Literal["stdio", "sse"] = "stdio",
-        host: str = "localhost",
-        port: int = 8000,
-        description: str = None,
-        debug: bool = False,
-    ):
-        self.crew_factory = crew_factory
-        self.crew = None
-        super().__init__(name, input_schema, transport, host, port, description, debug)
-    
-    async def _handle_tool_call(self, name: str, arguments: Dict[str, Any]) -> CallToolResult:
-        """Handle tool calls for CrewAI crews."""
-        self._log(f"Tool call: {name} with arguments: {arguments}")
-        
-        # Handle nested call_tool pattern
-        if name == "call_tool" and isinstance(arguments, dict) and "name" in arguments and "arguments" in arguments:
-            nested_name = arguments["name"]
-            nested_args = arguments["arguments"]
-            self._log(f"Nested call_tool - name: {nested_name}")
-            return await self._handle_tool_call(nested_name, nested_args)
-        
-        # Handle call to our main tool
-        if name == self.name:
-            try:
-                # Convert string arguments to proper input schema if needed
-                if isinstance(arguments, str):
-                    arguments = {"query": arguments}
-                
-                # Validate input against schema
-                input_data = self.input_schema(**arguments)
-                
-                # Initialize the crew if needed
-                if self.crew is None:
-                    self.crew = self.crew_factory()
-                
-                # Run the crew
-                result = self.crew.kickoff(inputs=input_data.model_dump())
-                
-                # Try to convert result to JSON if it's a Pydantic model
-                if hasattr(result, "model_dump_json"):
-                    result_str = result.model_dump_json()
-                else:
-                    result_str = str(result)
-                
-                return CallToolResult(
-                    isError=False,
-                    content=[TextContent(type="text", text=result_str)]
-                )
-            except Exception as e:
-                import traceback
-                tb = traceback.format_exc()
-                self._log(f"Error: {str(e)}\n{tb}")
-                return CallToolResult(
-                    isError=True,
-                    content=[TextContent(type="text", text=f"Error: {str(e)}")]
-                )
-        
-        return CallToolResult(
-            isError=True,
-            content=[TextContent(type="text", text=f"Tool not found: {name}")]
-        )
-
-
-class CamelAIAdapter(BaseMCPAdapter):
-    """Adapter for CamelAI agents."""
-    
-    def __init__(
-        self,
-        agent_factory: Callable,
-        name: str,
-        input_schema: Type[BaseModel],
-        transport: Literal["stdio", "sse"] = "stdio",
-        host: str = "localhost",
-        port: int = 8000,
-        description: str = None,
-        debug: bool = False,
-    ):
-        self.agent_factory = agent_factory
-        self.agent = None
-        super().__init__(name, input_schema, transport, host, port, description, debug)
-    
-    async def _handle_tool_call(self, name: str, arguments: Dict[str, Any]) -> CallToolResult:
-        """Handle tool calls for CamelAI agents."""
-        self._log(f"Tool call: {name} with arguments: {arguments}")
-        
-        # Handle nested call_tool pattern
-        if name == "call_tool" and isinstance(arguments, dict) and "name" in arguments and "arguments" in arguments:
-            nested_name = arguments["name"]
-            nested_args = arguments["arguments"]
-            self._log(f"Nested call_tool - name: {nested_name}")
-            return await self._handle_tool_call(nested_name, nested_args)
-        
-        # Handle call to our main tool
-        if name == self.name:
-            try:
-                # Convert string arguments to proper input schema if needed
-                if isinstance(arguments, str):
-                    arguments = {"query": arguments}
-                
-                # Validate input against schema
-                input_data = self.input_schema(**arguments)
-                
-                # Initialize the agent if needed
-                if self.agent is None:
-                    self.agent = self.agent_factory()
-                
-                # Call the appropriate method based on what's available
-                if hasattr(self.agent, "run"):
-                    result = self.agent.run(**input_data.model_dump())
-                elif hasattr(self.agent, "chat"):
-                    result = self.agent.chat(**input_data.model_dump())
-                else:
-                    raise ValueError("CamelAI agent has no run or chat method")
-                
-                return CallToolResult(
-                    isError=False,
-                    content=[TextContent(type="text", text=str(result))]
-                )
-            except Exception as e:
-                import traceback
-                tb = traceback.format_exc()
-                self._log(f"Error: {str(e)}\n{tb}")
-                return CallToolResult(
-                    isError=True,
-                    content=[TextContent(type="text", text=f"Error: {str(e)}")]
-                )
-        
-        return CallToolResult(
-            isError=True,
-            content=[TextContent(type="text", text=f"Tool not found: {name}")]
-        )
-
-
-# Framework-specific decorators
 
 def langchain_mcp(
     input_schema: Type[BaseModel],
@@ -364,123 +91,96 @@ def langchain_mcp(
             if args or kwargs:
                 return func(*args, **kwargs)
             
-            adapter = LangChainAdapter(
-                agent_factory=func,
-                name=name,
-                input_schema=input_schema,
-                transport=transport,
-                host=host,
-                port=port,
-                description=description or func.__doc__,
-                debug=debug,
-            )
-            adapter.run()
-            return adapter
+            # Set up description
+            tool_description = description or func.__doc__ or f"MCP server for {name}"
+            agent = None
             
-        return wrapper
-    return decorator
-
-
-def crewai_mcp(
-    input_schema: Type[BaseModel],
-    name: str,
-    description: str = None,
-    transport: Literal["stdio", "sse"] = "stdio",
-    host: str = "localhost",
-    port: int = 8000,
-    debug: bool = False,
-):
-    """
-    Decorator for converting CrewAI crews to MCP servers.
-    
-    Args:
-        input_schema: Pydantic model defining the input schema
-        name: Name for the MCP server
-        description: Description of the server
-        transport: Transport protocol ("stdio" or "sse")
-        host: Host for SSE transport
-        port: Port for SSE transport
-        debug: Enable debug logging
-    
-    Example:
-        class MarketingInput(BaseModel):
-            customer_domain: str
-            project_description: str
-        
-        @crewai_mcp(input_schema=MarketingInput, name="Marketing Crew")
-        def marketing_crew():
-            return MarketingPostsCrew().crew()
-    """
-    def decorator(func):
-        @functools.wraps(func)
-        def wrapper(*args, **kwargs):
-            if args or kwargs:
-                return func(*args, **kwargs)
+            # Create MCP server
+            mcp_server = FastMCP(name)
             
-            adapter = CrewAIAdapter(
-                crew_factory=func,
-                name=name,
-                input_schema=input_schema,
-                transport=transport,
-                host=host,
-                port=port,
-                description=description or func.__doc__,
-                debug=debug,
-            )
-            adapter.run()
-            return adapter
+            # Define list_tools handler
+            @mcp_server.tool()
+            def list_tools() -> List[MCPTool]:
+                return _get_tools(name, tool_description, input_schema)
             
-        return wrapper
-    return decorator
-
-
-def camelai_mcp(
-    input_schema: Type[BaseModel],
-    name: str,
-    description: str = None,
-    transport: Literal["stdio", "sse"] = "stdio",
-    host: str = "localhost",
-    port: int = 8000,
-    debug: bool = False,
-):
-    """
-    Decorator for converting CamelAI agents to MCP servers.
-    
-    Args:
-        input_schema: Pydantic model defining the input schema
-        name: Name for the MCP server
-        description: Description of the server
-        transport: Transport protocol ("stdio" or "sse")
-        host: Host for SSE transport
-        port: Port for SSE transport
-        debug: Enable debug logging
-    
-    Example:
-        class ChatInput(BaseModel):
-            message: str
-        
-        @camelai_mcp(input_schema=ChatInput, name="Customer Support")
-        def support_agent():
-            return CamelAgent()
-    """
-    def decorator(func):
-        @functools.wraps(func)
-        def wrapper(*args, **kwargs):
-            if args or kwargs:
-                return func(*args, **kwargs)
+            # Define call_tool handler
+            @mcp_server.tool()
+            async def call_tool(tool_name: str, arguments: Dict[str, Any]) -> CallToolResult:
+                nonlocal agent
+                
+                _log(f"Tool call: {tool_name} with arguments: {arguments}", debug)
+                
+                # Handle nested call_tool pattern
+                if tool_name == "call_tool" and isinstance(arguments, dict) and "name" in arguments and "arguments" in arguments:
+                    nested_name = arguments["name"]
+                    nested_args = arguments["arguments"]
+                    _log(f"Nested call_tool - name: {nested_name}", debug)
+                    return await call_tool(nested_name, nested_args)
+                
+                # Handle call to our main tool
+                if tool_name == name:
+                    try:
+                        # Convert string arguments to proper input schema if needed
+                        if isinstance(arguments, str):
+                            arguments = {"query": arguments}
+                        
+                        # Validate input against schema
+                        input_data = input_schema(**arguments)
+                        
+                        # Call the agent factory with validated input
+                        if agent is None:
+                            if asyncio.iscoroutinefunction(func):
+                                agent = await func(**input_data.model_dump())
+                            else:
+                                agent = func(**input_data.model_dump())
+                        
+                        # Process input with the agent
+                        if hasattr(agent, "invoke"):
+                            if asyncio.iscoroutinefunction(agent.invoke):
+                                result = await agent.invoke(input_data.model_dump())
+                            else:
+                                result = agent.invoke(input_data.model_dump())
+                        elif hasattr(agent, "run"):
+                            if asyncio.iscoroutinefunction(agent.run):
+                                result = await agent.run(str(input_data.model_dump()))
+                            else:
+                                result = agent.run(str(input_data.model_dump()))
+                        else:
+                            result = str(agent)
+                        
+                        return CallToolResult(
+                            isError=False,
+                            content=[TextContent(type="text", text=str(result))]
+                        )
+                    except Exception as e:
+                        import traceback
+                        tb = traceback.format_exc()
+                        _log(f"Error: {str(e)}\n{tb}", debug)
+                        return CallToolResult(
+                            isError=True,
+                            content=[TextContent(type="text", text=f"Error: {str(e)}")]
+                        )
+                
+                return CallToolResult(
+                    isError=True,
+                    content=[TextContent(type="text", text=f"Tool not found: {tool_name}")]
+                )
             
-            adapter = CamelAIAdapter(
-                agent_factory=func,
-                name=name,
-                input_schema=input_schema,
-                transport=transport,
-                host=host,
-                port=port,
-                description=description or func.__doc__,
-                debug=debug,
-            )
-            adapter.run()
-            return adapter
+            # Run the MCP server
+            print(f"\n🚀 Starting MCP server '{name}' with {transport} transport")
+            try:
+                if transport == "stdio":
+                    mcp_server.run(transport="stdio")
+                elif transport == "sse":
+                    print(f"📡 Listening on http://{host}:{port}")
+                    mcp_server.run(transport="sse", host=host, port=port)
+                else:
+                    raise ValueError(f"Unsupported transport: {transport}")
+            except Exception as e:
+                import traceback
+                print(f"ERROR in run: {str(e)}\n{traceback.format_exc()}")
+            
+            return mcp_server
             
         return wrapper
     return decorator
