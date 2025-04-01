@@ -4,9 +4,9 @@ import sys
 from dotenv import load_dotenv
 from langchain_community.chat_models import ChatPerplexity
 from langgraph.prebuilt import create_react_agent
-from src.auto_mcp import mcp_server
 
-import asyncio
+from auto_mcp import langchain_mcp
+from pydantic import BaseModel
 
 # Configure logging
 logging.basicConfig(
@@ -41,11 +41,23 @@ model = ChatPerplexity(
 logger.info("Creating Langchain agent")
 agent = create_react_agent(model, tools=[], debug=True)
 
+# Define input schema for the MCP server
+class QueryInput(BaseModel):
+    query: str
+    
+    class Config:
+        extra = "forbid"
+
 # Initialize the MCP server
 logger.info("Initializing MCP server")
 
-@mcp_server(name="Perplexity Agent", as_tool=True, debug=True)
-async def ask_pplx(query: str) -> str:
+@langchain_mcp(
+    input_schema=QueryInput,
+    name="Perplexity Agent",
+    description="Process queries using the Perplexity language model",
+    debug=True
+)
+async def ask_pplx(query: str):
     """
     Process a query using the Langchain agent.
     
@@ -62,7 +74,7 @@ async def ask_pplx(query: str) -> str:
         result = await agent.ainvoke({"messages": query})
         logger.info("Agent processed query successfully")
         logger.debug(f"Agent response: {result}")
-        return str(result)
+        return result
     except Exception as e:
         logger.error(f"Error processing query: {str(e)}", exc_info=True)
         return f"Error processing query: {str(e)}"

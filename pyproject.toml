@@ -10,13 +10,8 @@ readme = "README.md"
 requires-python = ">=3.10"  # Updated from >=3.9 to match mcp[cli] requirements
 license = "Apache-2.0"
 dependencies = [
-    "langchain>=0.3.0",
-    "langchain-community>=0.0.10",
-    "langchain-openai>=0.0.1",
-    "openai>=1.1.0",
     "python-dotenv>=1.0.0",
     "mcp[cli]>=0.0.1",
-    "langgraph>=0.2.0",
 ]
 
 [project.optional-dependencies]

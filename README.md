@@ -19,10 +19,18 @@ This creates an isolated Python environment using uv, a fast Python package inst
 ```bash
 source .venv/bin/activate
 ```
-This activates the virtual environment, ensuring that any packages installed will be isolated to this project.
+### 4. Install Dependencies
+```bash
+uv pip install -e .
+```
 
 ### 4. Run the MCP Server
+Create New terminal
 ```bash
+cd examples/langchain
+uv venv
+source .venv/bin/activate
+uv pip install -e <path-to-the-local-package>
 uv --directory $PWD run langchain-agent-server.py
 ```
 This starts the Model Context Protocol (MCP) server using uv to run the langchain-agent-server.py script from the current directory.
@@ -38,9 +46,9 @@ To integrate auto-mcp with Claude Desktop, modify the configuration file
                 "command": "<replace-with-path-to-uv-executable>",
                 "args": [
                     "--directory",
-                    "<replace-with-path-to-auto-mcp-repo>",
+                    "<replace-with-path-to-auto-mcp--example-repo>",
                     "run",
-                    "langchain-agent-server.py"
+                    "langchain_agent_server.py"
                 ]
             }
   }
@@ -53,7 +61,7 @@ This configuration tells Claude Desktop how to start the auto-mcp server. Make s
 Once the server is running, you can interact with it by using the `call_tool` command:
 
 ```
-call_tool ask_pplx "weather in nyc"
+call_tool "Perplexity Agent" "weather in nyc"
 ```
 This example sends a query about the weather in New York City to the Perplexity API through the auto-mcp server.
 

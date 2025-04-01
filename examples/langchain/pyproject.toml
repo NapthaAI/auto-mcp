@@ -1,0 +1,21 @@
+[build-system]
+requires = ["setuptools>=42", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "langchain-example"
+version = "0.1.0"
+description = "LangChain MCP server example"
+requires-python = ">=3.10"
+dependencies = [
+    "langchain>=0.3.0",
+    "langchain-community>=0.0.10",
+    "langgraph>=0.2.0",
+    "langchain-openai==0.3.11",
+    "python-dotenv>=1.0.0"
+]
+
+# Find packages in the current directory
+[tool.setuptools.packages.find]
+where = ["."]
+include = ["*"]
