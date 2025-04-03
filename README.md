@@ -27,14 +27,16 @@ uv pip install -e .
 ### 4. Run the MCP Server
 Create New terminal
 ```bash
-cd examples/langchain
+export package_path=$PWD
+cd examples/crewAI/stock_analysis
 uv venv
 source .venv/bin/activate
 uv pip install -e .
-uv pip install -e <path-to-the-local-package>
-uv --directory $PWD run langchain-agent-server.py
+uv pip install -e $package_path
+cd /src/stock_analysis
+uv --directory $PWD run mcp_run.py
 ```
-This starts the Model Context Protocol (MCP) server using uv to run the langchain-agent-server.py script from the current directory.
+This starts the Model Context Protocol (MCP) server using uv to run the mcp_run.py script from the current directory.
 
 ## Configuration
 
@@ -49,7 +51,7 @@ To integrate auto-mcp with Claude Desktop, modify the configuration file
                     "--directory",
                     "<replace-with-path-to-auto-mcp--example-repo>",
                     "run",
-                    "langchain_agent_server.py"
+                    "mcp_run.py"
                 ]
             }
   }
