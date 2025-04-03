@@ -2,12 +2,26 @@ import inspect
 import asyncio
 import functools
 import sys
+import contextlib
+import io
+import warnings
 from typing import Any, Callable, Dict, List, Literal, Optional, Type, Union
 
 from mcp.server.fastmcp import FastMCP
 from mcp.types import Tool as MCPTool
 from mcp.types import CallToolResult, TextContent
 from pydantic import BaseModel, create_model
+
+# Suppress warnings globally for the module
+warnings.filterwarnings("ignore")
+
+# Helper class to suppress stdout/stderr
+class NullWriter:
+    def write(self, *args, **kwargs):
+        pass
+    
+    def flush(self, *args, **kwargs):
+        pass
 
 
 class BaseMCPAdapter:
@@ -37,7 +51,7 @@ class BaseMCPAdapter:
     def _log(self, message: str):
         """Log a message if debug is enabled."""
         if self.debug:
-            print(f"DEBUG: {message}")
+            print(f"DEBUG: {message}", file=sys.__stderr__)  # Write to real stderr
     
     def _setup_mcp_server(self):
         """Set up the MCP server with tools."""
@@ -92,18 +106,32 @@ class BaseMCPAdapter:
     
     def run(self):
         """Run the MCP server."""
-        print(f"\n🚀 Starting MCP server '{self.name}' with {self.transport} transport")
+        # Save the original stdout and stderr
+        original_stdout = sys.stdout
+        original_stderr = sys.stderr
+        
         try:
+            print(f"\n🚀 Starting MCP server '{self.name}' with {self.transport} transport", 
+                  file=sys.__stdout__)  # Write to real stdout
+            
             if self.transport == "stdio":
+                # When using stdio transport, we need to be extra careful
+                # Run the server in a context that captures unexpected output
                 self.mcp_server.run(transport="stdio")
             elif self.transport == "sse":
-                print(f"📡 Listening on http://{self.host}:{self.port}")
+                print(f"📡 Listening on http://{self.host}:{self.port}", 
+                      file=sys.__stdout__)  # Write to real stdout
                 self.mcp_server.run(transport="sse", host=self.host, port=self.port)
             else:
                 raise ValueError(f"Unsupported transport: {self.transport}")
         except Exception as e:
             import traceback
-            print(f"ERROR in run: {str(e)}\n{traceback.format_exc()}")
+            print(f"ERROR in run: {str(e)}\n{traceback.format_exc()}", 
+                  file=sys.__stderr__)  # Write to real stderr
+        finally:
+            # Restore the original stdout and stderr
+            sys.stdout = original_stdout
+            sys.stderr = original_stderr
 
 
 class LangChainAdapter(BaseMCPAdapter):
@@ -147,24 +175,27 @@ class LangChainAdapter(BaseMCPAdapter):
                 
                 # Call the agent factory with validated input
                 if self.agent is None:
-                    if asyncio.iscoroutinefunction(self.agent_factory):
-                        self.agent = await self.agent_factory(**input_data.model_dump())
-                    else:
-                        self.agent = self.agent_factory(**input_data.model_dump())
+                    # Use redirect_stdout to prevent any output during agent initialization
+                    with contextlib.redirect_stdout(io.StringIO()):
+                        if asyncio.iscoroutinefunction(self.agent_factory):
+                            self.agent = await self.agent_factory(**input_data.model_dump())
+                        else:
+                            self.agent = self.agent_factory(**input_data.model_dump())
                 
-                # Process input with the agent
-                if hasattr(self.agent, "invoke"):
-                    if asyncio.iscoroutinefunction(self.agent.invoke):
-                        result = await self.agent.invoke(input_data.model_dump())
+                # Process input with the agent using stdout redirection
+                with contextlib.redirect_stdout(io.StringIO()):
+                    if hasattr(self.agent, "invoke"):
+                        if asyncio.iscoroutinefunction(self.agent.invoke):
+                            result = await self.agent.invoke(input_data.model_dump())
+                        else:
+                            result = self.agent.invoke(input_data.model_dump())
+                    elif hasattr(self.agent, "run"):
+                        if asyncio.iscoroutinefunction(self.agent.run):
+                            result = await self.agent.run(str(input_data.model_dump()))
+                        else:
+                            result = self.agent.run(str(input_data.model_dump()))
                     else:
-                        result = self.agent.invoke(input_data.model_dump())
-                elif hasattr(self.agent, "run"):
-                    if asyncio.iscoroutinefunction(self.agent.run):
-                        result = await self.agent.run(str(input_data.model_dump()))
-                    else:
-                        result = self.agent.run(str(input_data.model_dump()))
-                else:
-                    result = str(self.agent)
+                        result = str(self.agent)
                 
                 return CallToolResult(
                     isError=False,
@@ -216,6 +247,10 @@ class CrewAIAdapter(BaseMCPAdapter):
         
         # Handle call to our main tool
         if name == self.name:
+            # Save original stdout and stderr
+            original_stdout = sys.stdout
+            original_stderr = sys.stderr
+            
             try:
                 # Convert string arguments to proper input schema if needed
                 if isinstance(arguments, str):
@@ -226,10 +261,29 @@ class CrewAIAdapter(BaseMCPAdapter):
                 
                 # Initialize the crew if needed
                 if self.crew is None:
-                    self.crew = self.crew_factory()
+                    # Redirect stdout during crew initialization
+                    with contextlib.redirect_stdout(io.StringIO()):
+                        with contextlib.redirect_stderr(io.StringIO()):
+                            self.crew = self.crew_factory()
                 
-                # Run the crew
-                result = self.crew.kickoff(inputs=input_data.model_dump())
+                # Run the crew with stdout and stderr redirected
+                # This prevents interference with the Stdio transport
+                stdout_buffer = io.StringIO()
+                stderr_buffer = io.StringIO()
+                
+                with contextlib.redirect_stdout(stdout_buffer):
+                    with contextlib.redirect_stderr(stderr_buffer):
+                        # Also temporarily replace sys.stdout and sys.stderr for libraries
+                        # that might bypass contextlib redirection
+                        sys.stdout = NullWriter()
+                        sys.stderr = NullWriter()
+                        
+                        try:
+                            result = self.crew.kickoff(inputs=input_data.model_dump())
+                        finally:
+                            # Restore sys stdout/stderr within the context
+                            sys.stdout = original_stdout
+                            sys.stderr = original_stderr
                 
                 # Try to convert result to JSON if it's a Pydantic model
                 if hasattr(result, "model_dump_json"):
@@ -249,6 +303,10 @@ class CrewAIAdapter(BaseMCPAdapter):
                     isError=True,
                     content=[TextContent(type="text", text=f"Error: {str(e)}")]
                 )
+            finally:
+                # Ensure stdout and stderr are restored
+                sys.stdout = original_stdout
+                sys.stderr = original_stderr
         
         return CallToolResult(
             isError=True,
@@ -287,6 +345,10 @@ class CamelAIAdapter(BaseMCPAdapter):
         
         # Handle call to our main tool
         if name == self.name:
+            # Save original stdout and stderr
+            original_stdout = sys.stdout
+            original_stderr = sys.stderr
+            
             try:
                 # Convert string arguments to proper input schema if needed
                 if isinstance(arguments, str):
@@ -297,15 +359,29 @@ class CamelAIAdapter(BaseMCPAdapter):
                 
                 # Initialize the agent if needed
                 if self.agent is None:
-                    self.agent = self.agent_factory()
+                    # Redirect stdout during agent initialization
+                    with contextlib.redirect_stdout(io.StringIO()):
+                        with contextlib.redirect_stderr(io.StringIO()):
+                            self.agent = self.agent_factory()
                 
-                # Call the appropriate method based on what's available
-                if hasattr(self.agent, "run"):
-                    result = self.agent.run(**input_data.model_dump())
-                elif hasattr(self.agent, "chat"):
-                    result = self.agent.chat(**input_data.model_dump())
-                else:
-                    raise ValueError("CamelAI agent has no run or chat method")
+                # Call the appropriate method with stdout and stderr redirected
+                with contextlib.redirect_stdout(io.StringIO()):
+                    with contextlib.redirect_stderr(io.StringIO()):
+                        # Also temporarily replace sys.stdout and sys.stderr
+                        sys.stdout = NullWriter()
+                        sys.stderr = NullWriter()
+                        
+                        try:
+                            if hasattr(self.agent, "run"):
+                                result = self.agent.run(**input_data.model_dump())
+                            elif hasattr(self.agent, "chat"):
+                                result = self.agent.chat(**input_data.model_dump())
+                            else:
+                                raise ValueError("CamelAI agent has no run or chat method")
+                        finally:
+                            # Restore sys stdout/stderr within the context
+                            sys.stdout = original_stdout
+                            sys.stderr = original_stderr
                 
                 return CallToolResult(
                     isError=False,
@@ -319,6 +395,10 @@ class CamelAIAdapter(BaseMCPAdapter):
                     isError=True,
                     content=[TextContent(type="text", text=f"Error: {str(e)}")]
                 )
+            finally:
+                # Ensure stdout and stderr are restored
+                sys.stdout = original_stdout
+                sys.stderr = original_stderr
         
         return CallToolResult(
             isError=True,
@@ -417,6 +497,9 @@ def crewai_mcp(
             if args or kwargs:
                 return func(*args, **kwargs)
             
+            # Apply warning filters
+            warnings.filterwarnings("ignore")
+            
             adapter = CrewAIAdapter(
                 crew_factory=func,
                 name=name,
@@ -468,6 +551,9 @@ def camelai_mcp(
         def wrapper(*args, **kwargs):
             if args or kwargs:
                 return func(*args, **kwargs)
+            
+            # Apply warning filters
+            warnings.filterwarnings("ignore")
             
             adapter = CamelAIAdapter(
                 agent_factory=func,

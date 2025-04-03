@@ -1,0 +1,16 @@
+[
+    {
+        "name": "agent_deployment_1",
+        "module": {"name": "financial_agent","execution_type":"package"},
+        "node": {"ip": "localhost"},
+        "config": {
+            "config_name": "agent_config_1",
+            "llm_config": {"config_name": "model_2"},
+            "persona_module" : {"name": "richard_twitter"},
+            "system_prompt": {
+                "role": "You are a helpful AI assistant.",
+                "persona": ""
+            }
+        }
+    }
+]

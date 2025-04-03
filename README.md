@@ -30,6 +30,7 @@ Create New terminal
 cd examples/langchain
 uv venv
 source .venv/bin/activate
+uv pip install -e .
 uv pip install -e <path-to-the-local-package>
 uv --directory $PWD run langchain-agent-server.py
 ```
@@ -76,3 +77,5 @@ For debugging using the inspector tool
 ```
 npx @modelcontextprotocol/inspector uvx auto-mcp --repository $PWD
 ```
+
+call_tool financial_agent "what's the current stock price of amazon?"
