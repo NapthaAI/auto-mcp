@@ -187,63 +187,17 @@ def crewai_to_mcp_tool(
         description: The description of the tool
         input_schema: The Pydantic model class defining the input schema
     """
-    # Get the field names from the input schema
-    schema_fields = list(input_schema.model_fields.keys())
-
-    # Define the tool function that will be called by MCP
-    def run_tool(**kwargs):
+    # Define a typed function using the input schema
+    def run_tool(input_data: BaseModel):
         try:
-            # Debug: Print input args to stderr for debugging
-            import sys
-            print(f"DEBUG: run_tool received kwargs: {kwargs}", file=sys.__stderr__)
-            
-            # Create input data based on the input pattern received
-            # Case 1: Direct string in kwargs parameter {"kwargs": "string query"}
-            if len(kwargs) == 1 and "kwargs" in kwargs and isinstance(kwargs["kwargs"], str):
-                if "query" in schema_fields:
-                    input_data = input_schema(query=kwargs["kwargs"])
+            # Ensure input_data is of the correct type
+            if not isinstance(input_data, input_schema):
+                # If received as dict or other format, convert to our schema
+                if isinstance(input_data, dict):
+                    input_data = input_schema(**input_data)
                 else:
-                    # Use the first field if query doesn't exist
-                    input_data = input_schema(**{schema_fields[0]: kwargs["kwargs"]})
-            
-            # Case 2: JSON string in kwargs parameter {"kwargs": "{\"query\": \"string query\"}"}
-            elif len(kwargs) == 1 and "kwargs" in kwargs and isinstance(kwargs["kwargs"], str) and kwargs["kwargs"].startswith("{"):
-                try:
-                    import json
-                    parsed_kwargs = json.loads(kwargs["kwargs"])
-                    if isinstance(parsed_kwargs, dict):
-                        input_data = input_schema(**parsed_kwargs)
-                    else:
-                        # Fallback if it's not a proper dict
-                        input_data = input_schema(query=kwargs["kwargs"])
-                except:
-                    # If JSON parsing fails, use as direct query
-                    input_data = input_schema(query=kwargs["kwargs"]) if "query" in schema_fields else input_schema(**{schema_fields[0]: kwargs["kwargs"]})
-            
-            # Case 3: Normal kwargs matching schema
-            elif any(field in kwargs for field in schema_fields):
-                # Filter to only valid fields from schema
-                valid_kwargs = {k: v for k, v in kwargs.items() if k in schema_fields}
-                input_data = input_schema(**valid_kwargs)
-            
-            # Case 4: Empty input with default values in schema
-            elif not kwargs:
-                input_data = input_schema()
+                    raise TypeError(f"Expected {input_schema.__name__}, got {type(input_data).__name__}")
                 
-            # Case 5: Emergency fallback - if we can build a query from what we have
-            else:
-                if "query" in schema_fields:
-                    if "kwargs" in kwargs:
-                        # Last resort - use whatever is in kwargs as the query
-                        query_str = str(kwargs["kwargs"])
-                        input_data = input_schema(query=query_str)
-                    else:
-                        # Create an empty query as default
-                        input_data = input_schema(query="Please provide a specific question.")
-                else:
-                    # We have no valid inputs and no query field
-                    raise ValueError(f"Unable to parse input arguments: {kwargs}")
-            
             # Suppress standard output during execution
             with contextlib.redirect_stdout(io.StringIO()):
                 with contextlib.redirect_stderr(io.StringIO()):
@@ -263,7 +217,7 @@ def crewai_to_mcp_tool(
     # Set metadata on the function
     run_tool.__name__ = name
     run_tool.__doc__ = description
-    # Attach the input schema for introspection
-    run_tool.__annotations__ = {field: input_schema.model_fields[field].annotation for field in schema_fields}
+    run_tool.__annotations__ = {"input_data": input_schema}
     
+    # Return the function to be used as a tool
     return run_tool
