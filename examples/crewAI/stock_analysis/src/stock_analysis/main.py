@@ -1,25 +1,12 @@
 import sys
 from crew import StockAnalysisCrew
-from pydantic import BaseModel, ConfigDict
 
-from auto_mcp import crewai_mcp
-
-class QueryInput(BaseModel):
-    query: str
-    company_stock: str = "AMZN"
-    # Replace old Config class with model_config for Pydantic V2
-    model_config = ConfigDict(extra="forbid")
-    
-
-@crewai_mcp(name="financial_agent", input_schema=QueryInput)
 def run():
     """
-    Run the financial agent as an MCP server.
-    When called through MCP, this function will receive the validated
-    QueryInput object through the crewai_mcp wrapper.
+    Run the financial agent directly.
+    This function executes the crew without MCP integration.
     """
-    # Since the MCP decorator handles the input passing, 
-    # this function will execute the crew with the inputs provided by the MCP client
+    # Creates and returns the crew for direct usage
     crew = StockAnalysisCrew().crew()
     return crew
 

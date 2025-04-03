@@ -115,6 +115,7 @@ class CrewAIAdapter(BaseMCPAdapter):
             content=[TextContent(type="text", text=f"Tool not found: {name}")]
         )
 
+# Keep the existing decorator for backward compatibility
 def crewai_mcp(
     input_schema: Type[BaseModel],
     name: str,
@@ -169,3 +170,100 @@ def crewai_mcp(
             
         return wrapper
     return decorator
+
+# Add the new function-based approach
+def crewai_to_mcp_tool(
+    crewai_class: Any,
+    name: str,
+    description: str,
+    input_schema: Type[BaseModel],
+):
+    """
+    Convert a CrewAI class to an MCP tool.
+
+    Args:
+        crewai_class: The CrewAI class to convert
+        name: The name of the tool
+        description: The description of the tool
+        input_schema: The Pydantic model class defining the input schema
+    """
+    # Get the field names from the input schema
+    schema_fields = list(input_schema.model_fields.keys())
+
+    # Define the tool function that will be called by MCP
+    def run_tool(**kwargs):
+        try:
+            # Debug: Print input args to stderr for debugging
+            import sys
+            print(f"DEBUG: run_tool received kwargs: {kwargs}", file=sys.__stderr__)
+            
+            # Create input data based on the input pattern received
+            # Case 1: Direct string in kwargs parameter {"kwargs": "string query"}
+            if len(kwargs) == 1 and "kwargs" in kwargs and isinstance(kwargs["kwargs"], str):
+                if "query" in schema_fields:
+                    input_data = input_schema(query=kwargs["kwargs"])
+                else:
+                    # Use the first field if query doesn't exist
+                    input_data = input_schema(**{schema_fields[0]: kwargs["kwargs"]})
+            
+            # Case 2: JSON string in kwargs parameter {"kwargs": "{\"query\": \"string query\"}"}
+            elif len(kwargs) == 1 and "kwargs" in kwargs and isinstance(kwargs["kwargs"], str) and kwargs["kwargs"].startswith("{"):
+                try:
+                    import json
+                    parsed_kwargs = json.loads(kwargs["kwargs"])
+                    if isinstance(parsed_kwargs, dict):
+                        input_data = input_schema(**parsed_kwargs)
+                    else:
+                        # Fallback if it's not a proper dict
+                        input_data = input_schema(query=kwargs["kwargs"])
+                except:
+                    # If JSON parsing fails, use as direct query
+                    input_data = input_schema(query=kwargs["kwargs"]) if "query" in schema_fields else input_schema(**{schema_fields[0]: kwargs["kwargs"]})
+            
+            # Case 3: Normal kwargs matching schema
+            elif any(field in kwargs for field in schema_fields):
+                # Filter to only valid fields from schema
+                valid_kwargs = {k: v for k, v in kwargs.items() if k in schema_fields}
+                input_data = input_schema(**valid_kwargs)
+            
+            # Case 4: Empty input with default values in schema
+            elif not kwargs:
+                input_data = input_schema()
+                
+            # Case 5: Emergency fallback - if we can build a query from what we have
+            else:
+                if "query" in schema_fields:
+                    if "kwargs" in kwargs:
+                        # Last resort - use whatever is in kwargs as the query
+                        query_str = str(kwargs["kwargs"])
+                        input_data = input_schema(query=query_str)
+                    else:
+                        # Create an empty query as default
+                        input_data = input_schema(query="Please provide a specific question.")
+                else:
+                    # We have no valid inputs and no query field
+                    raise ValueError(f"Unable to parse input arguments: {kwargs}")
+            
+            # Suppress standard output during execution
+            with contextlib.redirect_stdout(io.StringIO()):
+                with contextlib.redirect_stderr(io.StringIO()):
+                    # Create and run the crew
+                    crew = crewai_class().crew()
+                    result = crew.kickoff(inputs=input_data.model_dump())
+            
+            # Return the result (MCP will handle the conversion)
+            return result
+            
+        except Exception as e:
+            import traceback
+            error_msg = f"Error in crewai_to_mcp_tool: {str(e)}\n{traceback.format_exc()}"
+            print(error_msg, file=sys.__stderr__)
+            raise
+    
+    # Set metadata on the function
+    run_tool.__name__ = name
+    run_tool.__doc__ = description
+    # Attach the input schema for introspection
+    run_tool.__annotations__ = {field: input_schema.model_fields[field].annotation for field in schema_fields}
+    
+    return run_tool

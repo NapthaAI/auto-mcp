@@ -125,7 +125,7 @@ class BaseMCPAdapter:
             sys.stderr = original_stderr
 
 # Import specific adapters
-from .adapters.crewai_adapter import CrewAIAdapter, crewai_mcp
+from .adapters.crewai_adapter import CrewAIAdapter, crewai_mcp, crewai_to_mcp_tool
 
 # Define what should be available when importing the package
-__all__ = ["BaseMCPAdapter", "CrewAIAdapter", "crewai_mcp"]
+__all__ = ["BaseMCPAdapter", "CrewAIAdapter", "crewai_mcp", "crewai_to_mcp_tool"]
