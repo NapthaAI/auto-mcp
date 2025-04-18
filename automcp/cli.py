@@ -3,7 +3,7 @@ import sys
 import subprocess
 import yaml
 from pathlib import Path
-import tomllib
+import toml
 import re
 
 # Determine the location of the templates relative to this file
@@ -101,9 +101,9 @@ def init_command(args) -> None:
 
                 # Parse the template TOML to get base dependencies
                 try:
-                    parsed_data = tomllib.loads(template_content)
+                    parsed_data = toml.loads(template_content)
                     base_deps = parsed_data.get("project", {}).get("dependencies", [])
-                except tomllib.TOMLDecodeError as e:
+                except toml.TomlDecodeError as e:
                     print(f"Warning: Could not parse pyproject.toml template: {e}", file=sys.stderr)
                     base_deps = [ # Fallback to known base deps if parse fails
                         "naptha-automcp",
