@@ -8,6 +8,7 @@ from pathlib import Path
 _CLI_DIR = Path(__file__).parent
 _TEMPLATE_FILE = _CLI_DIR / "cli_templates/run_mcp.py.template"
 _CONFIG_FILE = _CLI_DIR / "cli_templates/framework_config.yaml"
+_PYPROJECT_TEMPLATE_FILE = _CLI_DIR / "cli_templates/pyproject.toml.template"
 
 
 def create_mcp_server_file(directory: Path, framework: str) -> None:
@@ -84,10 +85,26 @@ def init_command(args) -> None:
         print(f"Error writing server file: {e}", file=sys.stderr)
         sys.exit(1)
 
+    # Create pyproject.toml if it doesn't exist
+    pyproject_path = current_dir / "pyproject.toml"
+    if not pyproject_path.exists():
+        if not _PYPROJECT_TEMPLATE_FILE.exists():
+            print(f"Warning: pyproject.toml template not found at {_PYPROJECT_TEMPLATE_FILE}", file=sys.stderr)
+        else:
+            try:
+                with open(_PYPROJECT_TEMPLATE_FILE, "r") as f_template, open(pyproject_path, "w") as f_dest:
+                    f_dest.write(f_template.read())
+                print(f"Created {pyproject_path}")
+            except IOError as e:
+                print(f"Error writing {pyproject_path}: {e}", file=sys.stderr)
+    else:
+        print(f"{pyproject_path} already exists, skipping creation.")
+
     print("\nSetup complete! Next steps:")
     print(f"1. Edit {current_dir / 'run_mcp.py'} to import and configure your {args.framework} agent/crew/graph")
-    print("2. Add a .env file with necessary environment variables")
-    print("3. Run your MCP server using one of these commands:")
+    print(f"2. Edit {pyproject_path} to add framework-specific dependencies (e.g., crewai, langgraph)")
+    print("3. Add a .env file with necessary environment variables")
+    print("4. Run your MCP server using one of these commands:")
     print("   - automcp serve         # For STDIO transport (default)")
     print("   - automcp serve -t sse     # For SSE transport")
     print("   - uv run serve_stdio           # Using the script entry point (if using uv)")
