@@ -25,7 +25,7 @@ class InputSchema(BaseModel):
     query: str
     # Add more parameters as needed
 
-name = "Your Agent Name"
+name = "your_agent_name" # Make sure name follows snake_case
 description = "Description of what your agent does"
 
 # Create an adapter for {{framework}}
