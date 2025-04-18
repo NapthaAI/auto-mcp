@@ -1,0 +1,28 @@
+[project]
+name = "mcp-project"
+version = "0.1.0"
+description = "A project with MCP server integration"
+requires-python = ">=3.11"
+dependencies = [
+    "naptha-automcp",
+    "mcp>=1.6.0",
+    "pydantic>=2.11.1",
+    "uv>=0.6.6"
+]
+
+[build-system]
+requires = [ "hatchling",]
+build-backend = "hatchling.build"
+
+[project.scripts]
+serve_stdio = "run_mcp:serve_stdio"
+serve_sse = "run_mcp:serve_sse"
+
+[tool.hatch.metadata]
+allow-direct-references = true
+
+[tool.hatch.build.targets.wheel]
+include = [ "run_mcp.py",]
+exclude = [ "__pycache__", "*.pyc",]
+sources = [ ".",]
+packages = ["."] 
