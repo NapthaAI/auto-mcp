@@ -75,6 +75,22 @@ mcp_crewai = create_crewai_adapter(
 )
 ```
 
+Edit the generated `pyproject.toml` file to add your framework-specific dependencies (like `crewai`, `langgraph`, etc.):
+
+```toml
+[project]
+# ... other project settings ...
+
+dependencies = [
+    "naptha-automcp",
+    "mcp>=1.6.0",
+    "pydantic>=2.11.1",
+    # Add framework-specific dependencies here:
+    "crewai>=0.108.0",
+    "crewai-tools>=0.38.1",
+]
+```
+
 Install dependencies and run your MCP server:
 
 ```bash
@@ -83,7 +99,7 @@ automcp serve -t sse
 
 ## 📁 Generated Files
 
-When you run `automcp init -f <FRAMEWORK>`, the following file is generated:
+When you run `automcp init -f <FRAMEWORK>`, the following files are generated:
 
 ### run_mcp.py
 
@@ -100,6 +116,19 @@ You'll need to edit this file to:
 - Define your input schema (the parameters your agent accepts)
 - Configure the adapter with your agent
 
+### pyproject.toml
+
+This file defines your Python project structure and dependencies. The generated file includes:
+
+- Basic project metadata (name derived from the directory, version, etc.)
+- Core dependencies: `naptha-automcp`, `mcp`, `pydantic`.
+- Build system configuration using `hatchling`.
+- Script entry points (`serve_stdio`, `serve_sse`) for running the server with `uv run`.
+
+You'll need to edit this file to:
+
+- Add dependencies specific to your chosen agent framework (e.g., `crewai`, `langgraph`).
+- Add any other dependencies your agent requires.
 
 ## 🔍 Examples
 
@@ -132,10 +161,11 @@ automcp serve -t sse
 
 Each example follows the same workflow as a regular project:
 
-1. Run `automcp init -f <FRAMEWORK>` to generate the server files
+1. Run `automcp init -f <FRAMEWORK>` to generate the server files (`run_mcp.py`, `pyproject.toml`)
 2. Edit `run_mcp.py` to import and configure the example agent
-3. Add a .env file with necessary environmental variables
-4. Install dependencies and serve using `automcp serve -t sse`
+3. Edit `pyproject.toml` to ensure all necessary dependencies (including the framework itself) are listed
+4. Add a .env file with necessary environmental variables
+5. Install dependencies (`uv sync` or `pip install -e .`) and serve using `automcp serve -t sse`
 
 ### CrewAI example
 Here's what a typical configured `run_mcp.py` looks like for a CrewAI example:

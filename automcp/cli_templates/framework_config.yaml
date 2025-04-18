@@ -9,6 +9,9 @@ frameworks:
           description=description,
           input_schema=InputSchema,
       )
+    dependencies:
+      - "crewai>=0.108.0"
+      - "crewai-tools>=0.38.1"
 
   mcp_agent:
     adapter_import: automcp.adapters.mcp_agent import create_mcp_agent_adapter
@@ -23,6 +26,9 @@ frameworks:
           description=description,
           input_schema=InputSchema,
       )
+    dependencies:
+      - "mcp-agent"
+      - "langchain-openai==0.2.14"
 
   langgraph:
     adapter_import: automcp.adapters.langgraph import create_langgraph_adapter
@@ -34,6 +40,11 @@ frameworks:
           description=description,
           input_schema=InputSchema,
       )
+    dependencies:
+      - "langchain-openai==0.2.14"
+      - "langchain==0.3.20"
+      - "langgraph==0.3.25"
+      - "langchain-core>=0.3.51"
 
   pydantic:
     adapter_import: automcp.adapters.pydantic import create_pydantic_adapter
@@ -45,6 +56,8 @@ frameworks:
           description=description,
           input_schema=InputSchema,
       )
+    dependencies:
+      - "pydantic-ai==0.0.43"
   
   llamaindex:
     adapter_import: automcp.adapters.llamaindex import create_llamaindex_adapter
@@ -56,6 +69,10 @@ frameworks:
           description=description,
           input_schema=InputSchema,
       )
+    dependencies:
+      - "llama-index>=0.12.28"
+      - "llama-index-core>=0.12.28"
+      - "llama-index-llms-openai"
 
   openai:
     adapter_import: automcp.adapters.openai import create_openai_adapter
@@ -67,4 +84,6 @@ frameworks:
           description=description,
           input_schema=InputSchema,
       )
+    dependencies:
+      - "openai-agents>=0.0.9"
           

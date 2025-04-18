@@ -3,11 +3,14 @@ import sys
 import subprocess
 import yaml
 from pathlib import Path
+import toml
+import re
 
 # Determine the location of the templates relative to this file
 _CLI_DIR = Path(__file__).parent
 _TEMPLATE_FILE = _CLI_DIR / "cli_templates/run_mcp.py.template"
 _CONFIG_FILE = _CLI_DIR / "cli_templates/framework_config.yaml"
+_PYPROJECT_TEMPLATE_FILE = _CLI_DIR / "cli_templates/pyproject.toml.template"
 
 
 def create_mcp_server_file(directory: Path, framework: str) -> None:
@@ -54,10 +57,11 @@ def create_mcp_server_file(directory: Path, framework: str) -> None:
     if not adapter_variable_name:
         adapter_variable_name = f"mcp_{framework}"
     
-    # Replace all placeholders
+    # Replace all placeholders except dependencies
     for key, value in framework_config.items():
-        placeholder = f"{{{{{key}}}}}"
-        content = content.replace(placeholder, value)
+        if isinstance(value, str): # Only replace if the value is a string
+            placeholder = f"{{{{{key}}}}}"
+            content = content.replace(placeholder, value)
     
     # Replace adapter_variable_name placeholder
     content = content.replace("{{adapter_variable_name}}", adapter_variable_name)
@@ -84,10 +88,84 @@ def init_command(args) -> None:
         print(f"Error writing server file: {e}", file=sys.stderr)
         sys.exit(1)
 
+    # Create pyproject.toml if it doesn't exist
+    pyproject_path = current_dir / "pyproject.toml"
+    if not pyproject_path.exists():
+        if not _PYPROJECT_TEMPLATE_FILE.exists():
+            print(f"Warning: pyproject.toml template not found at {_PYPROJECT_TEMPLATE_FILE}", file=sys.stderr)
+        else:
+            try:
+                # Read the template content
+                with open(_PYPROJECT_TEMPLATE_FILE, "r") as f_template:
+                    template_content = f_template.read()
+
+                # Parse the template TOML to get base dependencies
+                try:
+                    parsed_data = toml.loads(template_content)
+                    base_deps = parsed_data.get("project", {}).get("dependencies", [])
+                except toml.TomlDecodeError as e:
+                    print(f"Warning: Could not parse pyproject.toml template: {e}", file=sys.stderr)
+                    base_deps = [ # Fallback to known base deps if parse fails
+                        "naptha-automcp",
+                        "mcp>=1.6.0",
+                        "pydantic>=2.11.1",
+                    ]
+                
+                # Get project name from current directory for replacement
+                project_name = current_dir.name.replace(" ", "_").lower() 
+                output_content = template_content.replace(
+                    'name = "mcp-project"', 
+                    f'name = "{project_name}"'
+                )
+
+                # Load framework config to get framework-specific dependencies
+                framework_deps = []
+                try:
+                    with open(_CONFIG_FILE, "r") as f_config:
+                        config = yaml.safe_load(f_config)
+                        framework_deps = config.get("frameworks", {}).get(args.framework, {}).get("dependencies", [])
+                except Exception as e:
+                    print(f"Warning: Could not load framework dependencies from {_CONFIG_FILE}: {e}", file=sys.stderr)
+
+                # Combine base and framework dependencies, maintaining order and removing duplicates
+                combined_deps = []
+                seen_deps = set()
+                for dep in base_deps + framework_deps:
+                    if dep not in seen_deps:
+                        combined_deps.append(dep)
+                        seen_deps.add(dep)
+
+                # Format the combined dependencies list into TOML string
+                deps_list_str = "dependencies = [\n"
+                for dep in combined_deps:
+                    deps_list_str += f'    "{dep}",\n'
+                deps_list_str += "]"
+
+                # Replace the old dependencies block with the new one using regex
+                # This regex finds the whole 'dependencies = [...]' block
+                output_content = re.sub(
+                    r"^dependencies\s*=\s*\[.*?^\]", 
+                    deps_list_str, 
+                    output_content, 
+                    flags=re.MULTILINE | re.DOTALL
+                )
+
+                # Write the modified content
+                with open(pyproject_path, "w") as f_dest:
+                    f_dest.write(output_content)
+                print(f"Created {pyproject_path} for project '{project_name}' with {args.framework} dependencies.")
+
+            except IOError as e:
+                print(f"Error writing {pyproject_path}: {e}", file=sys.stderr)
+    else:
+        print(f"{pyproject_path} already exists, skipping creation.")
+
     print("\nSetup complete! Next steps:")
     print(f"1. Edit {current_dir / 'run_mcp.py'} to import and configure your {args.framework} agent/crew/graph")
-    print("2. Add a .env file with necessary environment variables")
-    print("3. Run your MCP server using one of these commands:")
+    print(f"2. Verify dependencies in {pyproject_path} and add any additional ones needed by your agent or remove the ones that are not needed.")
+    print("3. Add a .env file with necessary environment variables")
+    print("4. Run `uv sync` to install dependencies.")
+    print("5. Run your MCP server using one of these commands:")
     print("   - automcp serve         # For STDIO transport (default)")
     print("   - automcp serve -t sse     # For SSE transport")
     print("   - uv run serve_stdio           # Using the script entry point (if using uv)")
