@@ -1,3 +1,5 @@
+[![MseeP.ai Security Assessment Badge](https://mseep.net/pr/napthaai-automcp-badge.png)](https://mseep.ai/app/napthaai-automcp)
+
 # automcp
 
 ## 🚀 Overview
